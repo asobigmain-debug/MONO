@@ -397,8 +397,31 @@ async function startApp() {
   try {
     await gasGet('init');
     CATEGORIES = await gasGet('getCategories');
-    ALL_ITEMS  = await gasGet('getItems');
-    buildTabs(); renderItems(); hideLoading();
+    if (!Array.isArray(CATEGORIES)) CATEGORIES = [];
+    buildTabs();
+
+    // 100件ずつページング読み込み
+    ALL_ITEMS = [];
+    var limit = 100;
+    var offset = 0;
+    while (true) {
+      document.getElementById('loadMsg').textContent = '読み込み中... ' + (ALL_ITEMS.length > 0 ? ALL_ITEMS.length + '件読込済み' : '');
+      var res = await gasGet('getItems', { offset: offset, limit: limit });
+      var chunk, total;
+      if (Array.isArray(res)) {
+        // 旧形式
+        chunk = res; total = res.length; 
+      } else if (res && Array.isArray(res.items)) {
+        chunk = res.items; total = res.total || chunk.length;
+      } else {
+        break; // 想定外の形式はスキップ
+      }
+      ALL_ITEMS = ALL_ITEMS.concat(chunk);
+      renderItems();
+      if (chunk.length < limit || ALL_ITEMS.length >= total) break;
+      offset += limit;
+    }
+    hideLoading();
   } catch(e) { hideLoading(); alert('接続に失敗しました。\n' + e.message); resetGasUrl(); }
 }
 
@@ -711,7 +734,14 @@ async function onImportFileSelected(e){
     showLoading('インポート中...');
     try{
       var res=await gasPost('importItems',{items:items});
-      ALL_ITEMS=await gasGet('getItems');
+      // ページング再読み込み
+      ALL_ITEMS=[]; var off=0, lim=100, tot=null;
+      while(true){
+        var r2=await gasGet('getItems',{offset:off,limit:lim});
+        var chunk=Array.isArray(r2)?r2:r2.items; tot=Array.isArray(r2)?chunk.length:r2.total;
+        ALL_ITEMS=ALL_ITEMS.concat(chunk);
+        if(Array.isArray(r2)||ALL_ITEMS.length>=tot) break; off+=lim;
+      }
       renderItems(); hideLoading(); showImportResult(true,res.added+'件追加'+(res.skipped>0?'（重複'+res.skipped+'件スキップ）':''));
     }catch(ex){hideLoading();showImportResult(false,'インポート失敗：'+ex.message);}
   };
